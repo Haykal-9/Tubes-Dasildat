@@ -26,7 +26,13 @@ import pandas as pd
 # Paths / logging
 # --------------------------------------------------------------------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSET_DIR = os.path.join(os.path.dirname(BASE_DIR), "asset")
+DEPLOYED_ASSET_DIR = os.path.join(BASE_DIR, "asset")
+LOCAL_ASSET_DIR = os.path.join(os.path.dirname(BASE_DIR), "asset")
+ASSET_DIR = (
+    DEPLOYED_ASSET_DIR
+    if os.path.isdir(DEPLOYED_ASSET_DIR)
+    else LOCAL_ASSET_DIR
+)
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PLOTS_DIR = os.path.join(DATA_DIR, "plots")
 MODELS_DIR = os.path.join(BASE_DIR, "models")

@@ -34,6 +34,8 @@ jobs:
             exit 1
           fi
 
+      - name: Include shared assets in app bundle
+        run: cp -R asset fuel_price_predictor/asset
 
       - name: Upload app to Hugging Face Space
         working-directory: fuel_price_predictor
