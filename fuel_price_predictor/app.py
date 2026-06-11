@@ -13,8 +13,10 @@ minimalist design system via custom CSS.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import mimetypes
 import os
 
 import gradio as gr
@@ -24,6 +26,7 @@ import pandas as pd
 # Paths / logging
 # --------------------------------------------------------------------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_DIR = os.path.join(os.path.dirname(BASE_DIR), "asset")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PLOTS_DIR = os.path.join(DATA_DIR, "plots")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
@@ -155,6 +158,24 @@ def _img(filename: str):
     """Return a plot path if it exists, else ``None`` (graceful gr.Image)."""
     path = os.path.join(PLOTS_DIR, filename)
     return path if os.path.exists(path) else None
+
+
+def _asset_data_uri(filename: str) -> str:
+    """Return an asset as a data URI so custom HTML can render it reliably."""
+    path = os.path.join(ASSET_DIR, filename)
+    try:
+        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        with open(path, "rb") as asset_file:
+            encoded = base64.b64encode(asset_file.read()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+    except OSError:
+        logger.warning("Asset not found: %s", path)
+        return ""
+
+
+BRAND_LOGO_DATA_URI = _asset_data_uri(
+    "fuelpredict-logo-horizontal-transparent.png"
+)
 
 
 def _confidence(r2: float | None) -> tuple[str, str]:
@@ -772,6 +793,14 @@ h1, h2, h3, h4, .app-title {
   font-size: 14px;
   font-weight: 600;
   gap: 10px;
+}
+#top-nav .brand-logo {
+  display: block;
+  height: 34px;
+  max-width: min(42vw, 210px);
+  object-fit: contain;
+  object-position: left center;
+  width: auto;
 }
 #top-nav .brand-mark {
   align-items: center;
@@ -1804,8 +1833,8 @@ def build_ui() -> gr.Blocks:
             "family=Geist+Mono:wght@400;500;600&"
             "family=Inter:wght@400;500;600;700&display=swap'>"
             "<div id='top-nav'>"
-            "<div class='brand'><img src='/file=fuelpredict-logo-horizontal-transparent.svg' "
-            "alt='FuelPredict' style='height:34px;width:auto;display:block;'></div>"
+            f"<div class='brand'><img class='brand-logo' src='{BRAND_LOGO_DATA_URI}' "
+            "alt='FuelPredict'></div>"
             "<div class='nav-meta'><span>Dasar Ilmu Data</span>"
             "<span>2020–2026</span>"
             "<span class='live-pill'><span class='status-dot'></span>"
