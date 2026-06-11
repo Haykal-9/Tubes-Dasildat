@@ -1,0 +1,30 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.ipynb_checkpoints/
+.env
+.venv/
+venv/
+
+# Local run logs (redirected stdout/stderr — not part of the project)
+train_log.txt
+app_log.txt
+
+# ---------------------------------------------------------------------------
+# Generated plots — re-created on app start-up, so they are not committed.
+# ---------------------------------------------------------------------------
+data/plots/*.png
+
+# ---------------------------------------------------------------------------
+# Keep the trained artifacts and the cached test split / comparison table so
+# Hugging Face Spaces can serve predictions without retraining.
+# (Negated patterns override the ignores above.)
+# ---------------------------------------------------------------------------
+!models/
+!models/*.pkl
+!data/model_comparison.json
+!data/test_data.pkl

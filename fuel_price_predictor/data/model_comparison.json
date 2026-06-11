@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-06-07T23:50:43",
+  "models": {
+    "KNN": {
+      "metrics": {
+        "MAE": 0.03871,
+        "MSE": 0.0032,
+        "RMSE": 0.05654,
+        "R2": 0.9987,
+        "MAPE": 4.56953
+      },
+      "best_params": {
+        "metric": "manhattan",
+        "n_neighbors": 4,
+        "weights": "distance"
+      },
+      "train_seconds": 3.82,
+      "trained_at": "2026-06-07T23:50:43"
+    },
+    "SVM": {
+      "metrics": {
+        "MAE": 0.03823,
+        "MSE": 0.00238,
+        "RMSE": 0.04876,
+        "R2": 0.99903,
+        "MAPE": 10.66867
+      },
+      "best_params": {
+        "C": 100,
+        "epsilon": 0.01,
+        "gamma": "auto",
+        "kernel": "rbf"
+      },
+      "train_seconds": 23.64,
+      "trained_at": "2026-06-05T16:55:23",
+      "subsample_info": "Tuned 72-combo grid on 1,500-row subset (cv=5); linear kernel via LinearSVR; final fit on 10,000 of 21,974 rows (random_state=42)."
+    },
+    "Random Forest": {
+      "metrics": {
+        "MAE": 0.02502,
+        "MSE": 0.00118,
+        "RMSE": 0.03437,
+        "R2": 0.99952,
+        "MAPE": 4.69709
+      },
+      "best_params": {
+        "n_estimators": 300,
+        "min_samples_split": 5,
+        "min_samples_leaf": 1,
+        "max_features": null,
+        "max_depth": 50,
+        "bootstrap": false
+      },
+      "train_seconds": 270.47,
+      "trained_at": "2026-06-05T16:59:59"
+    }
+  },
+  "best_model": {
+    "name": "Random Forest",
+    "by": "RMSE",
+    "RMSE": 0.03437
+  },
+  "feature_names": [
+    "region_Asia",
+    "region_Europe",
+    "region_Middle East",
+    "region_North America",
+    "region_Oceania",
+    "region_South America",
+    "income_level",
+    "subsidy_level",
+    "country",
+    "brent_crude_usd",
+    "tax_percentage",
+    "year",
+    "month"
+  ]
+}
