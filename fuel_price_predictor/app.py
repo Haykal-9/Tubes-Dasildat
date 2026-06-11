@@ -1649,19 +1649,20 @@ footer {
 html, body {
   margin: 0 !important;
   max-width: none !important;
-  min-height: 100%;
+  min-height: 0;
   width: 100%;
 }
 #root, gradio-app {
   display: block;
   max-width: none !important;
-  min-height: 100vh;
+  min-height: 0;
   width: 100% !important;
 }
 .gradio-container {
+  box-sizing: border-box;
   margin: 0 !important;
   max-width: none !important;
-  min-height: 100vh !important;
+  min-height: 0 !important;
   padding: 0 clamp(16px, 2.2vw, 44px) 32px !important;
   width: 100% !important;
 }
