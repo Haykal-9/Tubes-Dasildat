@@ -1686,7 +1686,6 @@ html, body {
 }
 .prediction-workspace {
   align-items: stretch !important;
-  min-height: calc(100vh - 116px);
 }
 .prediction-workspace > .ds-card,
 .prediction-workspace > .results-panel {
@@ -1694,7 +1693,6 @@ html, body {
 }
 .prediction-workspace > .results-panel {
   align-self: flex-start !important;
-  min-height: calc(100vh - 104px);
 }
 .prediction-workspace > .results-panel .empty-state {
   min-height: min(42vh, 420px);
