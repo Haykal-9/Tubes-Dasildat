@@ -34,6 +34,7 @@ jobs:
             exit 1
           fi
 
+
       - name: Upload app to Hugging Face Space
         working-directory: fuel_price_predictor
         env:
