@@ -36,9 +36,9 @@ class RandomForestModel:
 
     Parameters
     ----------
-    n_iter : int, default 30
+    n_iter : int, default 12
         Number of parameter settings sampled by ``RandomizedSearchCV``.
-    cv : int, default 5
+    cv : int, default 3
         Cross-validation folds.
     n_jobs : int, default -1
         Parallelism for the search and the forest.
@@ -52,11 +52,13 @@ class RandomForestModel:
         "max_depth": [None, 10, 20, 30, 50],
         "min_samples_split": [2, 5, 10],
         "min_samples_leaf": [1, 2, 4],
-        "max_features": ["sqrt", "log2", None],
+        # With many one-hot country columns, sqrt/log2 frequently omit the
+        # country-price prior at a split and let global tax patterns dominate.
+        "max_features": [None],
         "bootstrap": [True, False],
     }
 
-    def __init__(self, n_iter: int = 30, cv: int = 5, n_jobs: int = -1) -> None:
+    def __init__(self, n_iter: int = 12, cv: int = 3, n_jobs: int = -1) -> None:
         """Create an untrained Random Forest model."""
         self.n_iter = n_iter
         self.cv = cv

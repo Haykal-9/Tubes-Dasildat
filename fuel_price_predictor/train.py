@@ -41,6 +41,7 @@ from src.models._common import (  # noqa: E402
     PLOT_DPI,
     PRIMARY,
     _apply_style,
+    compute_metrics,
 )
 from src.eda import generate_overview_plots  # noqa: E402
 
@@ -55,6 +56,7 @@ TEST_DATA_PATH = os.path.join(DATA_DIR, "test_data.pkl")
 COMPARISON_JSON = os.path.join(DATA_DIR, "model_comparison.json")
 COMPARISON_PLOT = os.path.join(PLOTS_DIR, "model_comparison.png")
 PREPROCESSOR_PATH = os.path.join(MODELS_DIR, "preprocessor.pkl")
+ARTIFACT_SCHEMA_VERSION = 4
 
 MODEL_FILES = {
     "KNN": os.path.join(MODELS_DIR, "knn_model.pkl"),
@@ -99,20 +101,15 @@ def _build_model(name: str):
     }[name]()
 
 
-def _train_one(name: str, model, X_train, y_train, feature_names=None) -> float:
+def _train_one(
+    name: str, model, X_train, y_train,
+) -> float:
     """Train *model* and return wall-clock training seconds."""
     logger.info("=" * 64)
     logger.info("Training %s ...", name)
     start = time.perf_counter()
     if name == "SVM":
         model.train(X_train, y_train, subsample=True, subsample_size=10_000)
-    elif name == "KNN":
-        # KNN benefits from amplifying the dominant ``country`` column so that
-        # neighbours are matched within the same country (see KNNModel.train).
-        country_index = (feature_names.index("country")
-                         if feature_names and "country" in feature_names
-                         else None)
-        model.train(X_train, y_train, country_index=country_index)
     else:
         model.train(X_train, y_train)
     elapsed = time.perf_counter() - start
@@ -135,6 +132,40 @@ def _load_comparison() -> dict:
             "feature_names": []}
 
 
+def _dataset_diagnostics(df: pd.DataFrame) -> dict:
+    """Return audit facts that explain why high R² must be interpreted carefully."""
+    frame = df.copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="raise")
+    test_year = int(frame["date"].dt.year.max())
+    train = frame[frame["date"].dt.year < test_year]
+    test = frame[frame["date"].dt.year == test_year]
+    country_means = train.groupby("country")[DataPreprocessor.TARGET].mean()
+    baseline = test["country"].map(country_means).fillna(
+        train[DataPreprocessor.TARGET].mean())
+    locked = {
+        column: int((frame.groupby("country")[column].nunique() > 1).sum())
+        for column in DataPreprocessor.COUNTRY_METADATA
+    }
+    fuel_corr = frame[DataPreprocessor.PARALLEL_TARGETS].corr()
+    return {
+        "country_mean_baseline_test_metrics": {
+            key: round(value, 5)
+            for key, value in compute_metrics(
+                test[DataPreprocessor.TARGET].to_numpy(), baseline.to_numpy()
+            ).items()
+        },
+        "countries_with_changed_metadata": locked,
+        "parallel_fuel_target_correlations": {
+            column: round(float(fuel_corr.loc[DataPreprocessor.TARGET, column]), 6)
+            for column in DataPreprocessor.PARALLEL_TARGETS[1:]
+        },
+        "note": (
+            "Dataset is synthetic; country identity explains much of the target "
+            "variance, so R2 is not per-prediction confidence."
+        ),
+    }
+
+
 def _recompute_best(comparison: dict) -> None:
     """Set ``best_model`` to the entry with the lowest test RMSE."""
     best_name, best_rmse = None, float("inf")
@@ -148,7 +179,7 @@ def _recompute_best(comparison: dict) -> None:
 
 
 def _plot_comparison(comparison: dict) -> None:
-    """Render the 4-panel (MAE, RMSE, R², MAPE) model-comparison bar chart."""
+    """Render the key absolute and relative test metrics."""
     models = list(comparison["models"].keys())
     if not models:
         return
@@ -159,7 +190,7 @@ def _plot_comparison(comparison: dict) -> None:
         ("MAE", "MAE (USD/L) — lower is better", False),
         ("RMSE", "RMSE (USD/L) — lower is better", False),
         ("R2", "R² — higher is better", True),
-        ("MAPE", "MAPE (%) — lower is better", False),
+        ("WAPE", "WAPE (%) — lower is better", False),
     ]
     fig, axes = plt.subplots(2, 2, figsize=(13, 10))
     fig.suptitle("Model Performance Comparison", fontsize=16,
@@ -193,7 +224,7 @@ def _print_summary(comparison: dict) -> None:
     """Print a fixed-width comparison table to the terminal."""
     models = list(comparison["models"].keys())
     header = (f"{'Model':<16}{'MAE':>10}{'RMSE':>10}{'R2':>10}"
-              f"{'MAPE %':>12}{'Akurasi%':>11}")
+              f"{'WAPE %':>12}{'NRMSE %':>12}")
     line = "-" * len(header)
     print("\n" + line)
     print("MODEL COMPARISON SUMMARY".center(len(header)))
@@ -204,7 +235,7 @@ def _print_summary(comparison: dict) -> None:
         mt = comparison["models"][m]["metrics"]
         # Akurasi% = R² x 100 (proportion of price variance explained).
         print(f"{m:<16}{mt['MAE']:>10.4f}{mt['RMSE']:>10.4f}"
-              f"{mt['R2']:>10.4f}{mt['MAPE']:>12.2f}{mt['R2'] * 100:>11.2f}")
+              f"{mt['R2']:>10.4f}{mt['WAPE']:>12.2f}{mt['NRMSE']:>12.2f}")
     print(line)
     if comparison.get("best_model"):
         best = comparison["best_model"]
@@ -221,7 +252,7 @@ def run(selected: str = "all") -> dict:
     _ensure_dirs()
     df = _load_dataset()
 
-    # 1) Preprocess (fit + 80/20 split, persists test_data.pkl).
+    # 1) Preprocess (one-hot country + latest-year holdout).
     logger.info("Fitting preprocessor and building train/test split...")
     pre = DataPreprocessor()
     X_train, X_test, y_train, y_test, feature_names = pre.fit_transform(
@@ -229,19 +260,42 @@ def run(selected: str = "all") -> dict:
     pre.save(PREPROCESSOR_PATH)
 
     # 2) Decide which models to train.
-    if selected == "all":
+    existing_comparison = _load_comparison()
+    full_rebuild = (
+        selected == "all"
+        or existing_comparison.get("artifact_schema_version")
+        != ARTIFACT_SCHEMA_VERSION
+    )
+    if full_rebuild:
         to_train = ["KNN", "SVM", "Random Forest"]
+        if selected != "all":
+            logger.warning(
+                "Existing artifacts use an older schema; rebuilding all models.")
     else:
         to_train = [MODEL_KEY_TO_NAME[selected]]
     logger.info("Models to train: %s", to_train)
 
-    comparison = _load_comparison()
+    comparison = (
+        {"generated_at": None, "models": {}, "best_model": None,
+         "feature_names": []}
+        if full_rebuild
+        else existing_comparison
+    )
     comparison["feature_names"] = feature_names
+    comparison["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
+    comparison["evaluation"] = {
+        "split": "year_holdout",
+        "train_years": pre.train_years,
+        "test_year": pre.test_year,
+        "country_representation": "one-hot plus train-only country price prior",
+        "parallel_fuel_targets_used_as_features": False,
+    }
+    comparison["diagnostics"] = _dataset_diagnostics(df)
 
     # 3) Train + evaluate each model.
     for name in to_train:
         model = _build_model(name)
-        elapsed = _train_one(name, model, X_train, y_train, feature_names)
+        elapsed = _train_one(name, model, X_train, y_train)
         metrics = model.evaluate(X_test, y_test)
 
         # Diagnostic plots.
@@ -252,7 +306,8 @@ def run(selected: str = "all") -> dict:
             X_test, y_test, os.path.join(PLOTS_DIR, f"{key}_residuals.png"))
         if isinstance(model, RandomForestModel):
             model.plot_feature_importance(
-                feature_names, os.path.join(PLOTS_DIR, "rf_feature_importance.png"))
+                feature_names,
+                os.path.join(PLOTS_DIR, "rf_feature_importance.png"))
 
         # Persist model + record entry.
         model.save(MODEL_FILES[name])

@@ -109,8 +109,12 @@ class AppState:
         self.df: pd.DataFrame | None = None
         self.countries: list = []
         self.regions: list = []
-        self.region_means: dict = {}
-        self.global_mean: float = 0.0
+        self.country_profiles: dict = {}
+        self.country_price_stats: dict = {}
+        self.country_tax_ranges: dict = {}
+        self.brent_year_ranges: dict = {}
+        self.year_min: int = 2020
+        self.year_max: int = 2026
 
     def model_r2(self, display_name: str) -> float | None:
         """Return the cached test R² for *display_name* (or None)."""
@@ -129,13 +133,14 @@ def _load_everything() -> None:
         STATE.df = pd.read_csv(CSV_PATH)
         STATE.countries = sorted(STATE.df["country"].astype(str).unique().tolist())
         STATE.regions = sorted(STATE.df["region"].astype(str).unique().tolist())
-        STATE.global_mean = float(STATE.df["petrol_usd_liter"].mean())
-        STATE.region_means = (
-            STATE.df.groupby("region")["petrol_usd_liter"].mean().round(4).to_dict()
-        )
-
         STATE.preprocessor = DataPreprocessor.load(
             os.path.join(MODELS_DIR, "preprocessor.pkl"))
+        STATE.country_profiles = STATE.preprocessor.country_profiles
+        STATE.country_price_stats = STATE.preprocessor.country_price_stats
+        STATE.country_tax_ranges = STATE.preprocessor.country_tax_ranges
+        STATE.brent_year_ranges = STATE.preprocessor.brent_year_ranges
+        STATE.year_min = min(STATE.preprocessor.train_years)
+        STATE.year_max = int(STATE.preprocessor.test_year)
         STATE.models = {
             "KNN": KNNModel.load(os.path.join(MODELS_DIR, "knn_model.pkl")),
             "SVM": SVMModel.load(os.path.join(MODELS_DIR, "svm_model.pkl")),
@@ -184,30 +189,33 @@ BRAND_LOGO_DATA_URI = _asset_data_uri(
 )
 
 
-def _confidence(r2: float | None) -> tuple[str, str]:
-    """Map an R² value to a (label, colour) confidence indicator."""
-    if r2 is None:
-        return "Tidak diketahui", TEXT_MUTED
-    if r2 > 0.85:
-        return "Tinggi", SUCCESS
-    if r2 > 0.70:
-        return "Sedang", WARNING
-    return "Rendah", ERROR
+def _wape_colour(wape: float | None) -> str:
+    """Return a display colour for lower-is-better WAPE."""
+    if wape is None:
+        return TEXT_MUTED
+    if wape < 5:
+        return SUCCESS
+    if wape < 10:
+        return WARNING
+    return ERROR
 
 
 def model_accuracy(display_name: str) -> tuple[float | None, float | None]:
-    """Return ``(R²-accuracy %, 100−MAPE %)`` for *display_name*.
-
-    Two intuitive percentage framings derived from the cached test metrics:
-    ``R² × 100`` (share of price variance explained, the textbook regression
-    "accuracy") and ``100 − MAPE`` (average prediction correctness). The raw
-    metrics in ``model_comparison.json`` are left unchanged — these are computed
-    for display only. Returns ``(None, None)`` when metrics are unavailable.
-    """
+    """Return temporal-test R² percentage and WAPE percentage."""
     m = STATE.comparison.get("models", {}).get(display_name, {}).get("metrics", {})
-    r2, mape = m.get("R2"), m.get("MAPE")
+    r2, wape = m.get("R2"), m.get("WAPE")
     return (round(r2 * 100, 2) if r2 is not None else None,
-            round(100 - mape, 2) if mape is not None else None)
+            round(wape, 2) if wape is not None else None)
+
+
+def country_profile_values(country: str) -> tuple[str, str, str]:
+    """Return locked region, income and subsidy metadata for a country."""
+    profile = STATE.country_profiles.get(str(country), {})
+    return (
+        profile.get("region", "Tidak diketahui"),
+        profile.get("income_level", "Tidak diketahui"),
+        profile.get("subsidy_level", "Tidak diketahui"),
+    )
 
 
 def _error_card(message: str) -> str:
@@ -245,6 +253,9 @@ def predict_price(country, region, income_level, subsidy_level,
 
     try:
         model = STATE.models[model_choice]
+        # Country metadata is locked by the dataset. Ignore stale or manipulated
+        # UI values so impossible country/category combinations never reach a model.
+        region, income_level, subsidy_level = country_profile_values(country)
         X = STATE.preprocessor.prepare_single_input(
             country=country, region=region, income_level=income_level,
             subsidy_level=subsidy_level, brent_crude=brent_crude,
@@ -257,12 +268,34 @@ def predict_price(country, region, income_level, subsidy_level,
             pd.DataFrame(columns=["Skenario", "Harga (USD/L)"])
 
     r2 = STATE.model_r2(model_choice)
-    conf_label, conf_colour = _confidence(r2)
-    acc_r2, acc_mape = model_accuracy(model_choice)
+    acc_r2, wape = model_accuracy(model_choice)
+    wape_colour = _wape_colour(wape)
     acc_r2_text = f"{acc_r2:.2f}%" if acc_r2 is not None else "n/a"
-    acc_mape_text = f"{acc_mape:.1f}%" if acc_mape is not None else "n/a"
+    wape_text = f"{wape:.1f}%" if wape is not None else "n/a"
     r2_text = f"{r2:.4f}" if r2 is not None else "n/a"
-    unknown_country = country not in STATE.preprocessor.country_to_code
+    stats = STATE.country_price_stats.get(country, {})
+    tax_range = STATE.country_tax_ranges.get(country)
+    brent_range = STATE.brent_year_ranges.get(int(year))
+    warnings = []
+    if brent_range is None:
+        warnings.append(
+            f"Tahun {int(year)} tidak tersedia dalam data training/test.")
+    elif not brent_range[0] <= float(brent_crude) <= brent_range[1]:
+        warnings.append(
+            f"Brent {float(brent_crude):.1f} berada di luar rentang historis "
+            f"{int(year)} ({brent_range[0]:.1f}–{brent_range[1]:.1f}).")
+    if tax_range and not tax_range[0] <= float(tax_pct) <= tax_range[1]:
+        warnings.append(
+            f"Pajak {float(tax_pct):.1f}% berada di luar rentang historis "
+            f"{country} ({tax_range[0]:.1f}%–{tax_range[1]:.1f}%).")
+    if stats and not stats["min"] <= pred <= stats["max"]:
+        warnings.append(
+            f"Prediksi berada di luar rentang historis {country} "
+            f"(${stats['min']:.3f}–${stats['max']:.3f}/L).")
+    warning_html = "".join(
+        f"<div class='notice'><strong>Perhatian:</strong> {message}</div>"
+        for message in warnings
+    )
 
     # Dense, scannable result card
     html = f"""
@@ -282,12 +315,12 @@ def predict_price(country, region, income_level, subsidy_level,
           <strong>{model_choice}</strong>
         </div>
         <div class="metric-cell">
-          <span>Akurasi R²</span>
+          <span>R² test 2026</span>
           <strong>{acc_r2_text}</strong>
         </div>
         <div class="metric-cell">
-          <span>Kepercayaan</span>
-          <strong style="color:{conf_colour};">{conf_label}</strong>
+          <span>WAPE test</span>
+          <strong style="color:{wape_colour};">{wape_text}</strong>
         </div>
       </div>
       <div class="detail-pills">
@@ -295,24 +328,26 @@ def predict_price(country, region, income_level, subsidy_level,
         <span class="pill">{region}</span>
         <span class="pill">{int(month):02d}/{int(year)}</span>
         <span class="pill">R² {r2_text}</span>
-        <span class="pill">Ketepatan {acc_mape_text}</span>
-        {"<span class='pill pill-error'>Negara baru · median encoding</span>" if unknown_country else ""}
+        <span class="pill">{income_level}</span>
+        <span class="pill">{subsidy_level}</span>
       </div>
     </div>
+    {warning_html}
     """
 
-    region_avg = STATE.region_means.get(region, float("nan"))
     table = pd.DataFrame(
         {
             "Skenario": [
                 "Prediksi Anda",
-                f"Rata-rata {region}",
-                "Rata-rata global",
+                f"Minimum historis {country}",
+                f"Rata-rata historis {country}",
+                f"Maksimum historis {country}",
             ],
             "Harga (USD/L)": [
                 round(pred, 3),
-                round(region_avg, 3) if region_avg == region_avg else None,
-                round(STATE.global_mean, 3),
+                round(stats.get("min", float("nan")), 3),
+                round(stats.get("mean", float("nan")), 3),
+                round(stats.get("max", float("nan")), 3),
             ],
         }
     )
@@ -321,8 +356,8 @@ def predict_price(country, region, income_level, subsidy_level,
 
 def build_comparison_df() -> pd.DataFrame:
     """Build the metric comparison table for Tab 2."""
-    cols = ["Model", "MAE", "RMSE", "R²", "MAPE (%)",
-            "Akurasi R² (%)", "Ketepatan (%)"]
+    cols = ["Model", "MAE (USD/L)", "RMSE (USD/L)", "R²",
+            "WAPE (%)", "NRMSE (%)", "MAPE (%)"]
     rows = []
     for name, entry in STATE.comparison.get("models", {}).items():
         m = entry.get("metrics", {})
@@ -330,14 +365,12 @@ def build_comparison_df() -> pd.DataFrame:
         mape = m.get("MAPE", float("nan"))
         rows.append({
             "Model": name,
-            "MAE": round(m.get("MAE", float("nan")), 4),
-            "RMSE": round(m.get("RMSE", float("nan")), 4),
+            "MAE (USD/L)": round(m.get("MAE", float("nan")), 4),
+            "RMSE (USD/L)": round(m.get("RMSE", float("nan")), 4),
             "R²": round(r2, 4),
+            "WAPE (%)": round(m.get("WAPE", float("nan")), 2),
+            "NRMSE (%)": round(m.get("NRMSE", float("nan")), 2),
             "MAPE (%)": round(mape, 2),
-            # Two intuitive accuracy framings (display only): variance explained
-            # and average correctness. Higher is better.
-            "Akurasi R² (%)": round(r2 * 100, 2),
-            "Ketepatan (%)": round(100 - mape, 2),
         })
     if not rows:
         return pd.DataFrame(columns=cols)
@@ -349,12 +382,12 @@ def _model_card_html(name: str, is_best: bool = False) -> str:
     entry = STATE.comparison.get("models", {}).get(name, {})
     m = entry.get("metrics", {})
     r2 = m.get("R2")
-    mape = m.get("MAPE")
+    wape = m.get("WAPE")
     mae = m.get("MAE")
     rmse = m.get("RMSE")
 
-    acc_r2 = f"{r2 * 100:.2f}%" if r2 is not None else "n/a"
-    acc_mape = f"{100 - mape:.1f}%" if mape is not None else "n/a"
+    acc_r2 = f"{r2:.4f}" if r2 is not None else "n/a"
+    wape_text = f"{wape:.1f}%" if wape is not None else "n/a"
     mae_text = f"{mae:.4f}" if mae is not None else "n/a"
     rmse_text = f"{rmse:.4f}" if rmse is not None else "n/a"
     r2_text = f"{r2:.4f}" if r2 is not None else "n/a"
@@ -381,12 +414,12 @@ def _model_card_html(name: str, is_best: bool = False) -> str:
       <div class="model-description">{desc}</div>
       <div class="model-primary-metrics">
         <div>
-          <span>Akurasi R²</span>
+          <span>R² test 2026</span>
           <strong>{acc_r2}</strong>
         </div>
         <div>
-          <span>Ketepatan</span>
-          <strong>{acc_mape}</strong>
+          <span>WAPE test</span>
+          <strong>{wape_text}</strong>
         </div>
       </div>
       <div class="model-secondary-metrics">
@@ -1826,6 +1859,16 @@ def build_ui() -> gr.Blocks:
     deferred to :meth:`launch` (see :func:`launch_app`).
     """
     blocks_kwargs = {"title": "Global Fuel Price Predictor"}
+    default_country = (
+        STATE.countries[0] if STATE.countries else "United States"
+    )
+    default_region, default_income, default_subsidy = country_profile_values(
+        default_country)
+    default_brent_range = STATE.brent_year_ranges.get(
+        STATE.year_max, (100.0, 130.0))
+    default_brent = round(sum(default_brent_range) / 2, 1)
+    default_model = STATE.comparison.get("best_model", {}).get(
+        "name", "Random Forest")
     if GRADIO_MAJOR < 6:
         blocks_kwargs["css"] = CUSTOM_CSS
         blocks_kwargs["theme"] = MINT_THEME
@@ -1848,8 +1891,8 @@ def build_ui() -> gr.Blocks:
             "<div id='app-header'>"
             "<div class='eyebrow'>Machine learning dashboard</div>"
             "<h1>Estimasi harga bensin global, tanpa tebakan rumit.</h1>"
-            "<p>Susun skenario ekonomi dan kebijakan, pilih model, lalu bandingkan "
-            "hasil prediksi dengan rata-rata wilayah dan global.</p>"
+            "<p>Pilih negara dan kondisi pasar, lalu bandingkan hasil prediksi "
+            "dengan rentang harga historis negara tersebut.</p>"
             "<div class='meta'>"
             "<span class='accent-tag'><span class='status-dot'></span> Siap digunakan</span>"
             "<span>84 negara</span><span>3 model regresi</span>"
@@ -1886,30 +1929,28 @@ def build_ui() -> gr.Blocks:
                         with gr.Row():
                             country = gr.Dropdown(
                                 choices=STATE.countries or ["United States"],
-                                value=(STATE.countries[0] if STATE.countries
-                                       else "United States"),
+                                value=default_country,
                                 label="Negara", filterable=True)
-                            region = gr.Dropdown(
-                                choices=STATE.regions or ["North America"],
-                                value=(STATE.regions[0] if STATE.regions
-                                       else "North America"),
-                                label="Wilayah")
+                            region = gr.Textbox(
+                                value=default_region, label="Wilayah",
+                                interactive=False)
 
                         # Section: Ekonomi
                         gr.HTML(_section_label(
-                            "02 · Ekonomi", "Pendapatan dan dukungan pemerintah"))
-                        income_level = gr.Radio(
-                            ["Low", "Middle", "High"], value="Middle",
-                            label="Tingkat Pendapatan")
-                        subsidy_level = gr.Radio(
-                            ["Low", "Medium", "High", "Very High"],
-                            value="Medium", label="Tingkat Subsidi")
+                            "02 · Profil negara", "Otomatis dari dataset"))
+                        with gr.Row():
+                            income_level = gr.Textbox(
+                                value=default_income, label="Tingkat Pendapatan",
+                                interactive=False)
+                            subsidy_level = gr.Textbox(
+                                value=default_subsidy, label="Tingkat Subsidi",
+                                interactive=False)
 
                         # Section: Pasar & Pajak
                         gr.HTML(_section_label(
                             "03 · Pasar & pajak", "Variabel yang paling mudah berubah"))
                         brent_crude = gr.Slider(
-                            20, 150, value=80, step=0.5,
+                            20, 150, value=default_brent, step=0.5,
                             label="Harga Brent Crude (USD/barel)")
                         tax_pct = gr.Slider(
                             0, 100, value=30, step=0.1,
@@ -1920,15 +1961,16 @@ def build_ui() -> gr.Blocks:
                             "04 · Periode", "Waktu estimasi"))
                         with gr.Row():
                             year = gr.Slider(
-                                2020, 2030, value=2026, step=1, label="Tahun")
+                                STATE.year_min, STATE.year_max,
+                                value=STATE.year_max, step=1, label="Tahun")
                             month = gr.Dropdown(
                                 choices=MONTHS, value=6, label="Bulan")
 
                         # Section: Model & Action
                         gr.HTML(_section_label(
-                            "05 · Model", "Random Forest direkomendasikan"))
+                            "05 · Model", f"{default_model} direkomendasikan"))
                         model_choice = gr.Radio(
-                            MODEL_DISPLAY, value="Random Forest",
+                            MODEL_DISPLAY, value=default_model,
                             label="Pilih Model")
                         btn_predict = gr.Button(
                             "Hitung prediksi", variant="primary",
@@ -1943,13 +1985,18 @@ def build_ui() -> gr.Blocks:
                             "<strong>Belum ada estimasi</strong>"
                             "<span>Lengkapi skenario lalu tekan Hitung prediksi.</span>"
                             "</div>")
-                        gr.Markdown("### Posisi terhadap pasar")
+                        gr.Markdown("### Posisi terhadap histori negara")
                         out_table = gr.Dataframe(
                             headers=["Skenario", "Harga (USD/L)"],
                             label="",
                             interactive=False, wrap=True,
                             elem_classes="market-table")
 
+                country.change(
+                    fn=country_profile_values,
+                    inputs=[country],
+                    outputs=[region, income_level, subsidy_level],
+                )
                 btn_predict.click(
                     fn=predict_price,
                     inputs=[country, region, income_level, subsidy_level,
@@ -1970,9 +2017,9 @@ def build_ui() -> gr.Blocks:
                 gr.Markdown(
                     "> **Cara baca:** *MAE/RMSE* = error dalam USD/liter "
                     "(makin kecil = makin baik). "
-                    "*Akurasi R²* & *Ketepatan* = persentase akurasi "
-                    "(makin besar = makin baik). "
-                    "Ketiga model memiliki akurasi **89–99%**.")
+                    "*R²* = variasi yang dijelaskan pada holdout tahun 2026, "
+                    "bukan confidence untuk satu prediksi. "
+                    "*WAPE/NRMSE* = error relatif terhadap skala harga.")
                 gr.HTML(best_model_badge())
 
                 # Model cards

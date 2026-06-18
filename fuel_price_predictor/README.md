@@ -13,8 +13,7 @@ pinned: false
 # ⛽ Global Fuel Price Predictor
 
 Prediksi **harga bensin (petrol, USD/liter)** untuk 84 negara berdasarkan
-faktor ekonomi & kebijakan (harga minyak Brent, pajak, tingkat subsidi, tingkat
-pendapatan, region, dan waktu). Tiga model regresi — **KNN**, **SVM**, dan
+negara, harga minyak Brent, pajak, dan waktu. Tiga model regresi — **KNN**, **SVM**, dan
 **Random Forest** — dilatih, dibandingkan, dan disajikan lewat web app Gradio
 yang siap di-deploy ke **Hugging Face Spaces**.
 
@@ -23,11 +22,12 @@ yang siap di-deploy ke **Hugging Face Spaces**.
 ## 🚀 Cara pakai web app
 
 1. Buka tab **Prediksi Harga BBM**.
-2. Pilih **country**, **region**, **income level**, dan **subsidy level**.
+2. Pilih **country**; region, income level, dan subsidy tampil otomatis sebagai
+   metadata read-only negara tersebut.
 3. Atur slider **Brent Crude (USD/barrel)**, **Tax (%)**, **Year**, dan pilih **Month**.
 4. Pilih model (**KNN / SVM / Random Forest**) lalu tekan **Prediksi**.
-5. Lihat harga prediksi, badge model, R² model, *confidence note*, serta
-   tabel perbandingan terhadap rata-rata region & rata-rata global.
+5. Lihat harga prediksi, badge model, R² temporal-test, serta
+   tabel perbandingan terhadap minimum, rata-rata, dan maksimum historis negara.
 
 Tab **Perbandingan Model** menampilkan metrik ketiga model + grafik, dan tab
 **Dataset Overview** menampilkan statistik deskriptif serta visualisasi EDA.
@@ -43,10 +43,16 @@ Tab **Perbandingan Model** menampilkan metrik ketiga model + grafik, dan tab
 | **Coverage** | 84 negara · 7 region · ~27.500 baris |
 | **Target** | `petrol_usd_liter` (harga bensin, USD/liter) |
 
-**Fitur yang digunakan:** `region` (One-Hot, drop_first), `income_level`
-(ordinal), `subsidy_level` (ordinal), `country` (label encoding),
-`brent_crude_usd` & `tax_percentage` (StandardScaler), serta `year` & `month`
-yang diekstrak dari `date` (StandardScaler).
+**Fitur yang digunakan:** `country` (One-Hot), `country_price_prior`,
+`brent_crude_usd`, `tax_percentage`, `year`, dan `month`.
+`country_price_prior` adalah rata-rata historis negara yang dihitung hanya dari
+data training 2020–2025; fitur ini menjaga level harga negara tanpa membocorkan
+target test 2026. `diesel_usd_liter` dan `lpg_usd_liter` tidak digunakan karena
+keduanya adalah target paralel yang hampir identik dengan harga petrol. Region,
+income level, dan subsidy hanya metadata negara.
+
+KNN dan SVM menyimpan `StandardScaler` di dalam sklearn `Pipeline`; Random
+Forest menggunakan fitur mentah karena tidak berbasis jarak.
 
 ---
 
@@ -56,40 +62,42 @@ yang diekstrak dari `date` (StandardScaler).
 |---|---|---|---|
 | **KNN** | `GridSearchCV` (n_neighbors, weights, metric) | Rata-rata target dari *k* tetangga terdekat | Pola lokal, dataset tidak terlalu besar |
 | **SVM (SVR)** | `GridSearchCV` (kernel, C, epsilon, gamma); tune di subset kecil → refit di subsample 10.000; kernel linier via `LinearSVR` | Margin ε + kernel untuk non-linieritas | Hubungan non-linier, dimensi fitur tinggi |
-| **Random Forest** | `RandomizedSearchCV` (n_iter=30) | Ansambel decision tree (bagging) | Akurasi tinggi + *feature importance*, baseline kuat data tabular |
+| **Random Forest** | `RandomizedSearchCV` (n_iter=12) | Ansambel decision tree (bagging) | Akurasi tinggi + *feature importance*, baseline kuat data tabular |
 
 ---
 
 ## 📈 Hasil perbandingan model
 
-> Hasil di bawah dari training pada test set 5.494 baris (split 80:20,
-> `random_state=42`). Nilai lengkap tersimpan di `data/model_comparison.json`.
+> Hasil di bawah berasal dari **year holdout**: model dilatih pada seluruh
+> data 2020–2025 dan diuji hanya pada 1.176 baris tahun 2026. Nilai lengkap
+> tersimpan di `data/model_comparison.json`.
 
-| Model | MAE | RMSE | R² | MAPE (%) | Akurasi (R²) | Ketepatan (100−MAPE) |
-|---|---|---|---|---|---|---|
-| KNN | 0.0387 | 0.0565 | 0.9987 | 4.57 | 99.87% | 95.4% |
-| SVM | 0.0382 | 0.0488 | 0.9990 | 10.67 | 99.90% | 89.3% |
-| **Random Forest** 🏆 | **0.0250** | **0.0344** | **0.9995** | **4.70** | **99.95%** | **95.3%** |
+| Model | MAE (USD/L) | RMSE (USD/L) | R² | WAPE (%) | NRMSE (%) |
+|---|---|---|---|---|---|
+| KNN | 0.0983 | 0.1512 | 0.9921 | 3.71 | 5.71 |
+| **SVM** 🏆 | **0.0327** | **0.0409** | **0.9994** | 1.23 | **1.55** |
+| Random Forest | **0.0266** | 0.1102 | 0.9958 | **1.00** | 4.16 |
 
-> **Cara baca:** *MAE/RMSE* adalah **error** (USD/liter — makin kecil makin bagus,
-> 0 = sempurna), **bukan** akurasi. *Akurasi (R²)* = proporsi variasi harga yang
-> dijelaskan model, *Ketepatan (100−MAPE)* = rata-rata ketepatan prediksi. Dengan
-> akurasi **89–99%**, ketiga model sudah jauh di atas target 80%.
+> **Cara baca:** *MAE/RMSE* adalah error absolut dalam USD/liter. *WAPE/NRMSE*
+> adalah error relatif terhadap skala harga. R² bukan confidence untuk satu
+> prediksi dan tetap tinggi karena identitas negara menjelaskan sebagian besar
+> variasi harga.
 
-> **Catatan tuning KNN:** karena `country` menentukan ~90% level harga, KNN paling
-> akurat saat kolom `country` *diperkuat* (×10) sehingga tetangga selalu dari negara
-> yang sama, lalu diinterpolasi pada fitur ekonomi/waktu. Justru men-`StandardScaler`
-> semua fitur atau *target-encoding* `country` memperburuk KNN drastis
-> (RMSE 0.0565 → 0.20 / 0.12) karena merusak pencocokan antar-negara. KNN sudah
-> mendekati plafonnya; akurasi terbaik tetap di Random Forest.
+> Sebagai pembanding, baseline yang hanya memakai rata-rata harga tiap negara
+> sudah mencapai R² **0.9237** pada test 2026. Korelasi petrol dengan diesel dan
+> LPG masing-masing **0.9990** dan **0.9999**, sehingga keduanya sengaja dilarang
+> menjadi fitur.
 
-**Best model:** **Random Forest** (RMSE terendah = 0.0344, R² = 0.9995).
-Hyper-parameter terpilih: `n_estimators=300, max_depth=50, min_samples_split=5,
-min_samples_leaf=1, max_features=None, bootstrap=False`.
+> Region, tingkat pendapatan, dan subsidi tidak pernah berubah di dalam satu
+> negara pada dataset. Karena itu UI menguncinya sebagai metadata dan tidak
+> membuat kombinasi negara/kategori yang tidak pernah ada.
 
-> Catatan: ketiga model sangat akurat karena `country` (label-encoded) hampir
-> sepenuhnya menentukan level harga tiap negara; Random Forest unggul dengan
-> menangkap interaksi non-linier antar fitur tanpa perlu penskalaan.
+**Best model berdasarkan RMSE:** **SVM** (RMSE = 0.0409, R² = 0.9994).
+Hyper-parameter terpilih: `kernel=poly, C=10, epsilon=0.01, gamma=auto`.
+
+> Dataset bersifat sintetis. Model mempelajari pola generator data dan tidak
+> boleh diklaim sebagai prediktor harga BBM dunia nyata. Input Brent di luar
+> rentang historis tahun terpilih akan diberi warning pada UI.
 
 ---
 

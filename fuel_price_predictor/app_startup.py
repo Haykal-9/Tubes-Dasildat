@@ -23,6 +23,7 @@ REQUIRED_ARTIFACTS = [
     os.path.join(MODELS_DIR, "rf_model.pkl"),
 ]
 COMPARISON_JSON = os.path.join(DATA_DIR, "model_comparison.json")
+EXPECTED_ARTIFACT_SCHEMA_VERSION = 4
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,7 +35,19 @@ logger = logging.getLogger("app_startup")
 
 def artifacts_present() -> bool:
     """Return True when every required model artifact is on disk."""
-    return all(os.path.exists(p) for p in REQUIRED_ARTIFACTS)
+    if not all(os.path.exists(p) for p in REQUIRED_ARTIFACTS):
+        return False
+    try:
+        import json
+
+        with open(COMPARISON_JSON, "r", encoding="utf-8") as handle:
+            comparison = json.load(handle)
+        return (
+            comparison.get("artifact_schema_version")
+            == EXPECTED_ARTIFACT_SCHEMA_VERSION
+        )
+    except (OSError, ValueError):
+        return False
 
 
 def overview_plots_present() -> bool:

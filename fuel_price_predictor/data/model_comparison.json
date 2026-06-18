@@ -1,78 +1,196 @@
 {
-  "generated_at": "2026-06-07T23:50:43",
+  "generated_at": "2026-06-15T18:43:58",
   "models": {
     "KNN": {
       "metrics": {
-        "MAE": 0.03871,
-        "MSE": 0.0032,
-        "RMSE": 0.05654,
-        "R2": 0.9987,
-        "MAPE": 4.56953
+        "MAE": 0.0983,
+        "MSE": 0.02285,
+        "RMSE": 0.15116,
+        "R2": 0.99211,
+        "MAPE": 5.08545,
+        "WAPE": 3.71372,
+        "NRMSE": 5.71062
       },
       "best_params": {
-        "metric": "manhattan",
-        "n_neighbors": 4,
+        "metric": "euclidean",
+        "n_neighbors": 3,
         "weights": "distance"
       },
-      "train_seconds": 3.82,
-      "trained_at": "2026-06-07T23:50:43"
+      "train_seconds": 88.77,
+      "trained_at": "2026-06-15T18:39:28"
     },
     "SVM": {
       "metrics": {
-        "MAE": 0.03823,
-        "MSE": 0.00238,
-        "RMSE": 0.04876,
-        "R2": 0.99903,
-        "MAPE": 10.66867
+        "MAE": 0.03644,
+        "MSE": 0.00203,
+        "RMSE": 0.04503,
+        "R2": 0.9993,
+        "MAPE": 5.73273,
+        "WAPE": 1.37681,
+        "NRMSE": 1.70118
       },
       "best_params": {
-        "C": 100,
+        "C": 10,
         "epsilon": 0.01,
-        "gamma": "auto",
-        "kernel": "rbf"
+        "gamma": "scale",
+        "kernel": "poly"
       },
-      "train_seconds": 23.64,
-      "trained_at": "2026-06-05T16:55:23",
-      "subsample_info": "Tuned 72-combo grid on 1,500-row subset (cv=5); linear kernel via LinearSVR; final fit on 10,000 of 21,974 rows (random_state=42)."
+      "train_seconds": 24.17,
+      "trained_at": "2026-06-15T18:39:53",
+      "subsample_info": "Scaled Pipeline; tuned on 1,500 rows (cv=5); final fit on 10,000 of 26,292 rows."
     },
     "Random Forest": {
       "metrics": {
-        "MAE": 0.02502,
-        "MSE": 0.00118,
-        "RMSE": 0.03437,
-        "R2": 0.99952,
-        "MAPE": 4.69709
+        "MAE": 0.02149,
+        "MSE": 0.00072,
+        "RMSE": 0.02674,
+        "R2": 0.99975,
+        "MAPE": 3.19967,
+        "WAPE": 0.8119,
+        "NRMSE": 1.01033
       },
       "best_params": {
-        "n_estimators": 300,
-        "min_samples_split": 5,
-        "min_samples_leaf": 1,
+        "n_estimators": 200,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
         "max_features": null,
-        "max_depth": 50,
+        "max_depth": 30,
         "bootstrap": false
       },
-      "train_seconds": 270.47,
-      "trained_at": "2026-06-05T16:59:59"
+      "train_seconds": 231.43,
+      "trained_at": "2026-06-15T18:43:58"
     }
   },
   "best_model": {
     "name": "Random Forest",
     "by": "RMSE",
-    "RMSE": 0.03437
+    "RMSE": 0.02674
   },
   "feature_names": [
-    "region_Asia",
-    "region_Europe",
-    "region_Middle East",
-    "region_North America",
-    "region_Oceania",
-    "region_South America",
-    "income_level",
-    "subsidy_level",
-    "country",
+    "country_Algeria",
+    "country_Angola",
+    "country_Argentina",
+    "country_Australia",
+    "country_Austria",
+    "country_Bangladesh",
+    "country_Belgium",
+    "country_Botswana",
+    "country_Brazil",
+    "country_Cameroon",
+    "country_Canada",
+    "country_Chile",
+    "country_China",
+    "country_Colombia",
+    "country_Czech Republic",
+    "country_Denmark",
+    "country_Ecuador",
+    "country_Egypt",
+    "country_Ethiopia",
+    "country_Finland",
+    "country_France",
+    "country_Germany",
+    "country_Ghana",
+    "country_Greece",
+    "country_Hong Kong",
+    "country_Hungary",
+    "country_India",
+    "country_Indonesia",
+    "country_Iran",
+    "country_Iraq",
+    "country_Ireland",
+    "country_Israel",
+    "country_Italy",
+    "country_Ivory Coast",
+    "country_Japan",
+    "country_Jordan",
+    "country_Kenya",
+    "country_Kuwait",
+    "country_Lebanon",
+    "country_Libya",
+    "country_Malaysia",
+    "country_Mexico",
+    "country_Morocco",
+    "country_Mozambique",
+    "country_Myanmar",
+    "country_Namibia",
+    "country_Nepal",
+    "country_Netherlands",
+    "country_New Zealand",
+    "country_Nigeria",
+    "country_Norway",
+    "country_Pakistan",
+    "country_Peru",
+    "country_Philippines",
+    "country_Poland",
+    "country_Portugal",
+    "country_Qatar",
+    "country_Romania",
+    "country_Russia",
+    "country_Rwanda",
+    "country_Saudi Arabia",
+    "country_Senegal",
+    "country_Singapore",
+    "country_South Africa",
+    "country_South Korea",
+    "country_Spain",
+    "country_Sri Lanka",
+    "country_Sudan",
+    "country_Sweden",
+    "country_Switzerland",
+    "country_Taiwan",
+    "country_Tanzania",
+    "country_Thailand",
+    "country_Tunisia",
+    "country_Turkey",
+    "country_UAE",
+    "country_Uganda",
+    "country_Ukraine",
+    "country_United Kingdom",
+    "country_United States",
+    "country_Venezuela",
+    "country_Vietnam",
+    "country_Zambia",
+    "country_Zimbabwe",
+    "country_price_prior",
     "brent_crude_usd",
     "tax_percentage",
     "year",
     "month"
-  ]
+  ],
+  "artifact_schema_version": 4,
+  "evaluation": {
+    "split": "year_holdout",
+    "train_years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "test_year": 2026,
+    "country_representation": "one-hot plus train-only country price prior",
+    "parallel_fuel_targets_used_as_features": false
+  },
+  "diagnostics": {
+    "country_mean_baseline_test_metrics": {
+      "MAE": 0.38167,
+      "MSE": 0.22077,
+      "RMSE": 0.46986,
+      "R2": 0.92372,
+      "MAPE": 15.11943,
+      "WAPE": 14.41933,
+      "NRMSE": 17.75101
+    },
+    "countries_with_changed_metadata": {
+      "region": 0,
+      "income_level": 0,
+      "subsidy_level": 0
+    },
+    "parallel_fuel_target_correlations": {
+      "diesel_usd_liter": 0.999045,
+      "lpg_usd_liter": 0.999917
+    },
+    "note": "Dataset is synthetic; country identity explains much of the target variance, so R2 is not per-prediction confidence."
+  }
 }

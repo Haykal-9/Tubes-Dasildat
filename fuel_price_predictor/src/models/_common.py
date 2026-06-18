@@ -33,18 +33,22 @@ PLOT_DPI = 150
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """Return the standard regression metric dict.
 
-    Keys: ``MAE``, ``MSE``, ``RMSE``, ``R2`` and ``MAPE`` (the latter as a
-    percentage). All values are plain Python floats for easy JSON serialising.
+    WAPE and NRMSE report error relative to the target scale and are more stable
+    than MAPE when prices are close to zero.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     mse = float(mean_squared_error(y_true, y_pred))
+    mean_abs_target = float(np.mean(np.abs(y_true)))
+    sum_abs_target = float(np.sum(np.abs(y_true)))
     return {
         "MAE": float(mean_absolute_error(y_true, y_pred)),
         "MSE": mse,
         "RMSE": float(np.sqrt(mse)),
         "R2": float(r2_score(y_true, y_pred)),
         "MAPE": float(mean_absolute_percentage_error(y_true, y_pred) * 100.0),
+        "WAPE": float(np.sum(np.abs(y_true - y_pred)) / sum_abs_target * 100.0),
+        "NRMSE": float(np.sqrt(mse) / mean_abs_target * 100.0),
     }
 
 
