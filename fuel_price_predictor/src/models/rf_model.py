@@ -1,8 +1,11 @@
-"""Random Forest regression model for fuel-price prediction.
+"""Random Forest residual forecaster for fuel-price prediction.
 
 Wraps a scikit-learn :class:`~sklearn.ensemble.RandomForestRegressor` tuned with
 :class:`~sklearn.model_selection.RandomizedSearchCV`. In addition to the shared
 model API it exposes :meth:`plot_feature_importance` (exclusive to this model).
+When a train-only country trend prior is supplied, the forest learns only the
+residual correction over that trend so future forecasts keep moving with time
+instead of flattening into the same terminal tree leaf.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from ._common import (
     PLOT_DPI,
     PRIMARY,
     compute_metrics,
+    make_time_series_cv,
     plot_predictions_vs_actual,
     plot_residuals,
 )
@@ -48,14 +52,14 @@ class RandomForestModel:
 
     #: Parameter distribution sampled during :meth:`train`.
     PARAM_DIST: Dict[str, List] = {
-        "n_estimators": [50, 100, 200, 300],
-        "max_depth": [None, 10, 20, 30, 50],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4],
+        "n_estimators": [100, 150, 200],
+        "max_depth": [6, 8, 10, 12],
+        "min_samples_split": [20, 40, 60],
+        "min_samples_leaf": [10, 20, 30],
         # With many one-hot country columns, sqrt/log2 frequently omit the
         # country-price prior at a split and let global tax patterns dominate.
         "max_features": [None],
-        "bootstrap": [True, False],
+        "bootstrap": [True],
     }
 
     def __init__(self, n_iter: int = 12, cv: int = 3, n_jobs: int = -1) -> None:
@@ -66,23 +70,30 @@ class RandomForestModel:
         self.model: RandomForestRegressor | None = None
         self.best_params_: Dict | None = None
         self.best_score_: float | None = None
+        self.trend_prior_index: int | None = None
+        self.cv_strategy = "TimeSeriesSplit"
 
     # ------------------------------------------------------------------ #
     # Training / inference
     # ------------------------------------------------------------------ #
-    def train(self, X_train: np.ndarray, y_train: np.ndarray) -> "RandomForestModel":
-        """Run ``RandomizedSearchCV`` and keep the best estimator."""
+    def train(
+        self, X_train: np.ndarray, y_train: np.ndarray,
+        trend_prior_index: int | None = None,
+    ) -> "RandomForestModel":
+        """Run ``RandomizedSearchCV`` and keep the best residual estimator."""
+        self.trend_prior_index = trend_prior_index
+        y_fit = self._to_residual_target(X_train, y_train)
         logger.info("[RF] Starting RandomizedSearchCV (n_iter=%d)...", self.n_iter)
         search = RandomizedSearchCV(
             estimator=RandomForestRegressor(random_state=RANDOM_STATE),
             param_distributions=self.PARAM_DIST,
             n_iter=self.n_iter,
-            cv=self.cv,
+            cv=make_time_series_cv(len(X_train), self.cv),
             scoring="neg_mean_squared_error",
             n_jobs=self.n_jobs,
             random_state=RANDOM_STATE,
         )
-        search.fit(X_train, y_train)
+        search.fit(X_train, y_fit)
 
         self.model = search.best_estimator_
         self.best_params_ = search.best_params_
@@ -90,14 +101,18 @@ class RandomForestModel:
         cv_rmse = float(np.sqrt(-self.best_score_))
 
         logger.info("[RF] Best params: %s", self.best_params_)
-        logger.info("[RF] Best CV score: MSE=%.5f (RMSE=%.5f)",
+        logger.info("[RF] Best CV residual score: MSE=%.5f (RMSE=%.5f)",
                     -self.best_score_, cv_rmse)
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Return petrol-price predictions for the design matrix *X*."""
         self._check_trained()
-        return self.model.predict(X)
+        correction = self.model.predict(X)
+        if self.trend_prior_index is None:
+            return correction
+        trend = np.asarray(X, dtype=float)[:, self.trend_prior_index]
+        return np.maximum(trend + correction, 0.0)
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
         """Return ``{MAE, MSE, RMSE, R2, MAPE}`` on the held-out test set."""
@@ -197,6 +212,8 @@ class RandomForestModel:
                 "model": self.model,
                 "best_params_": self.best_params_,
                 "best_score_": self.best_score_,
+                "trend_prior_index": self.trend_prior_index,
+                "cv_strategy": self.cv_strategy,
             },
             path,
             compress=3,
@@ -211,6 +228,8 @@ class RandomForestModel:
         obj.model = payload["model"]
         obj.best_params_ = payload.get("best_params_")
         obj.best_score_ = payload.get("best_score_")
+        obj.trend_prior_index = payload.get("trend_prior_index")
+        obj.cv_strategy = payload.get("cv_strategy", "TimeSeriesSplit")
         logger.info("[RF] Loaded model from %s", path)
         return obj
 
@@ -221,3 +240,13 @@ class RandomForestModel:
         if self.model is None:
             raise RuntimeError(
                 "RandomForestModel is not trained yet. Call train() first.")
+
+    def _to_residual_target(
+        self, X_train: np.ndarray, y_train: np.ndarray,
+    ) -> np.ndarray:
+        """Return residual target when trend prior is available."""
+        y = np.asarray(y_train, dtype=float)
+        if self.trend_prior_index is None:
+            return y
+        trend = np.asarray(X_train, dtype=float)[:, self.trend_prior_index]
+        return y - trend

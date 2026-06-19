@@ -1,70 +1,129 @@
 {
-  "generated_at": "2026-06-15T18:43:58",
+  "generated_at": "2026-06-19T07:18:47",
   "models": {
     "KNN": {
       "metrics": {
-        "MAE": 0.0983,
-        "MSE": 0.02285,
-        "RMSE": 0.15116,
-        "R2": 0.99211,
-        "MAPE": 5.08545,
-        "WAPE": 3.71372,
-        "NRMSE": 5.71062
+        "MAE": 0.09941,
+        "MSE": 0.02483,
+        "RMSE": 0.15757,
+        "R2": 0.99142,
+        "MAPE": 5.14735,
+        "WAPE": 3.7558,
+        "NRMSE": 5.95284
+      },
+      "train_metrics": {
+        "MAE": 0.0697,
+        "MSE": 0.01116,
+        "RMSE": 0.10565,
+        "R2": 0.99524,
+        "MAPE": 5.2565,
+        "WAPE": 3.07647,
+        "NRMSE": 4.6634
+      },
+      "generalization": {
+        "gap": {
+          "MAE": 0.02971,
+          "RMSE": 0.05192,
+          "WAPE": 0.67932,
+          "NRMSE": 1.28944
+        },
+        "status": "controlled",
+        "note": "Positive gaps mean test error is higher than train error; large gaps indicate overfitting risk."
       },
       "best_params": {
         "metric": "euclidean",
-        "n_neighbors": 3,
-        "weights": "distance"
+        "n_neighbors": 15,
+        "weights": "uniform"
       },
-      "train_seconds": 88.77,
-      "trained_at": "2026-06-15T18:39:28"
+      "cv_strategy": "TimeSeriesSplit",
+      "train_seconds": 6.73,
+      "trained_at": "2026-06-19T07:17:12"
     },
     "SVM": {
       "metrics": {
-        "MAE": 0.03644,
-        "MSE": 0.00203,
-        "RMSE": 0.04503,
-        "R2": 0.9993,
-        "MAPE": 5.73273,
-        "WAPE": 1.37681,
-        "NRMSE": 1.70118
+        "MAE": 0.05349,
+        "MSE": 0.00668,
+        "RMSE": 0.08175,
+        "R2": 0.99769,
+        "MAPE": 16.91762,
+        "WAPE": 2.02098,
+        "NRMSE": 3.08827
+      },
+      "train_metrics": {
+        "MAE": 0.11801,
+        "MSE": 0.04616,
+        "RMSE": 0.21484,
+        "R2": 0.98031,
+        "MAPE": 20.85295,
+        "WAPE": 5.20889,
+        "NRMSE": 9.4829
+      },
+      "generalization": {
+        "gap": {
+          "MAE": -0.06452,
+          "RMSE": -0.1331,
+          "WAPE": -3.18791,
+          "NRMSE": -6.39463
+        },
+        "status": "controlled",
+        "note": "Positive gaps mean test error is higher than train error; large gaps indicate overfitting risk."
       },
       "best_params": {
-        "C": 10,
-        "epsilon": 0.01,
-        "gamma": "scale",
-        "kernel": "poly"
+        "kernel": "linear",
+        "C": 0.1,
+        "epsilon": 0.01
       },
-      "train_seconds": 24.17,
-      "trained_at": "2026-06-15T18:39:53",
-      "subsample_info": "Scaled Pipeline; tuned on 1,500 rows (cv=5); final fit on 10,000 of 26,292 rows."
+      "cv_strategy": "TimeSeriesSplit",
+      "train_seconds": 13.55,
+      "trained_at": "2026-06-19T07:17:26",
+      "subsample_info": "Scaled Pipeline; tuned on most recent 1,500 rows (cv=TimeSeriesSplit, splits=5); final fit on most recent 10,000 of 26,292 rows."
     },
     "Random Forest": {
       "metrics": {
-        "MAE": 0.02149,
-        "MSE": 0.00072,
-        "RMSE": 0.02674,
+        "MAE": 0.04407,
+        "MSE": 0.00355,
+        "RMSE": 0.05955,
+        "R2": 0.99877,
+        "MAPE": 3.35197,
+        "WAPE": 1.66488,
+        "NRMSE": 2.24974
+      },
+      "train_metrics": {
+        "MAE": 0.01831,
+        "MSE": 0.00059,
+        "RMSE": 0.02423,
         "R2": 0.99975,
-        "MAPE": 3.19967,
-        "WAPE": 0.8119,
-        "NRMSE": 1.01033
+        "MAPE": 3.17351,
+        "WAPE": 0.80815,
+        "NRMSE": 1.06965
+      },
+      "generalization": {
+        "gap": {
+          "MAE": 0.02576,
+          "RMSE": 0.03532,
+          "WAPE": 0.85673,
+          "NRMSE": 1.18009
+        },
+        "status": "controlled",
+        "note": "Positive gaps mean test error is higher than train error; large gaps indicate overfitting risk."
       },
       "best_params": {
         "n_estimators": 200,
-        "min_samples_split": 2,
-        "min_samples_leaf": 2,
+        "min_samples_split": 20,
+        "min_samples_leaf": 10,
         "max_features": null,
-        "max_depth": 30,
-        "bootstrap": false
+        "max_depth": 12,
+        "bootstrap": true
       },
-      "train_seconds": 231.43,
-      "trained_at": "2026-06-15T18:43:58"
+      "cv_strategy": "TimeSeriesSplit",
+      "train_seconds": 79.62,
+      "trained_at": "2026-06-19T07:18:47"
     }
   },
   "best_model": {
     "name": "Random Forest",
     "by": "RMSE",
-    "RMSE": 0.02674
+    "RMSE": 0.05955
   },
   "feature_names": [
     "country_Algeria",
@@ -155,9 +214,15 @@
     "brent_crude_usd",
     "tax_percentage",
     "year",
-    "month"
+    "month",
+    "time_index",
+    "forecast_horizon_months",
+    "month_sin",
+    "month_cos",
+    "country_trend_per_month",
+    "country_trend_forecast_prior"
   ],
-  "artifact_schema_version": 4,
+  "artifact_schema_version": 8,
   "evaluation": {
     "split": "year_holdout",
     "train_years": [
@@ -169,7 +234,9 @@
       2025
     ],
     "test_year": 2026,
-    "country_representation": "one-hot plus train-only country price prior",
+    "model_selection_cv": "TimeSeriesSplit on chronological training rows",
+    "country_representation": "one-hot plus train-only country price and trend priors",
+    "random_forest_strategy": "country trend prior plus residual forest",
     "parallel_fuel_targets_used_as_features": false
   },
   "diagnostics": {

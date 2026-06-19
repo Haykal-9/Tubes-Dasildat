@@ -32,6 +32,12 @@ yang siap di-deploy ke **Hugging Face Spaces**.
 Tab **Perbandingan Model** menampilkan metrik ketiga model + grafik, dan tab
 **Dataset Overview** menampilkan statistik deskriptif serta visualisasi EDA.
 
+Slider **Year** mendukung skenario masa depan sampai 4 tahun setelah tahun
+terakhir dataset. Dengan data saat ini berarti prediksi bisa dibuat sampai
+2030. Tahun setelah 2026 ditandai sebagai **prediksi masa depan**: output tetap
+keluar, tetapi metrik test 2026 tidak boleh dibaca sebagai jaminan akurasi masa
+depan.
+
 ---
 
 ## 📊 Dataset
@@ -44,9 +50,11 @@ Tab **Perbandingan Model** menampilkan metrik ketiga model + grafik, dan tab
 | **Target** | `petrol_usd_liter` (harga bensin, USD/liter) |
 
 **Fitur yang digunakan:** `country` (One-Hot), `country_price_prior`,
-`brent_crude_usd`, `tax_percentage`, `year`, dan `month`.
-`country_price_prior` adalah rata-rata historis negara yang dihitung hanya dari
-data training 2020–2025; fitur ini menjaga level harga negara tanpa membocorkan
+`brent_crude_usd`, `tax_percentage`, `year`, `month`, `time_index`,
+`forecast_horizon_months`, `month_sin`, `month_cos`,
+`country_trend_per_month`, dan `country_trend_forecast_prior`.
+`country_price_prior` dan fitur tren negara dihitung hanya dari
+data training 2020–2025; fitur ini membuat model membaca arah waktu tanpa membocorkan
 target test 2026. `diesel_usd_liter` dan `lpg_usd_liter` tidak digunakan karena
 keduanya adalah target paralel yang hampir identik dengan harga petrol. Region,
 income level, dan subsidy hanya metadata negara.
@@ -54,15 +62,25 @@ income level, dan subsidy hanya metadata negara.
 KNN dan SVM menyimpan `StandardScaler` di dalam sklearn `Pipeline`; Random
 Forest menggunakan fitur mentah karena tidak berbasis jarak.
 
+Untuk tahun setelah data terakhir, UI merekomendasikan **SVM** karena model ini
+paling halus untuk prediksi masa depan. **KNN** tetap tersedia, tetapi kurang
+direkomendasikan untuk forecast jauh karena berbasis tetangga historis.
+**Random Forest** dilatih sebagai residual forecaster:
+`prediksi akhir = tren negara + koreksi residual pohon`.
+
 ---
 
 ## 🤖 Tiga model & kapan dipilih
 
 | Model | Tuning | Inti metode | Kapan dipilih |
 |---|---|---|---|
-| **KNN** | `GridSearchCV` (n_neighbors, weights, metric) | Rata-rata target dari *k* tetangga terdekat | Pola lokal, dataset tidak terlalu besar |
-| **SVM (SVR)** | `GridSearchCV` (kernel, C, epsilon, gamma); tune di subset kecil → refit di subsample 10.000; kernel linier via `LinearSVR` | Margin ε + kernel untuk non-linieritas | Hubungan non-linier, dimensi fitur tinggi |
-| **Random Forest** | `RandomizedSearchCV` (n_iter=12) | Ansambel decision tree (bagging) | Akurasi tinggi + *feature importance*, baseline kuat data tabular |
+| **KNN** | `GridSearchCV` (n_neighbors, metric; `weights=uniform`) | Rata-rata target dari *k* tetangga terdekat | Pola lokal, dataset tidak terlalu besar |
+| **SVM (SVR)** | `GridSearchCV` (kernel, C, epsilon, gamma); tune di 1.500 baris terbaru → refit di 10.000 baris terbaru; kernel linier via `LinearSVR` | Margin ε + kernel untuk non-linieritas | Hubungan non-linier, dimensi fitur tinggi |
+| **Random Forest** | `RandomizedSearchCV` (n_iter=12) | Tren negara + koreksi residual dari ansambel decision tree | Forecast skenario dengan interpretasi *feature importance* |
+
+Semua proses pemilihan hyperparameter memakai `TimeSeriesSplit` pada baris
+training yang sudah diurutkan waktu, sehingga validasi model tidak mencampur
+masa depan ke fold masa lalu.
 
 ---
 
@@ -70,13 +88,14 @@ Forest menggunakan fitur mentah karena tidak berbasis jarak.
 
 > Hasil di bawah berasal dari **year holdout**: model dilatih pada seluruh
 > data 2020–2025 dan diuji hanya pada 1.176 baris tahun 2026. Nilai lengkap
-> tersimpan di `data/model_comparison.json`.
+> tersimpan di `data/model_comparison.json`, termasuk metrik train-vs-test
+> untuk membaca risiko overfitting.
 
 | Model | MAE (USD/L) | RMSE (USD/L) | R² | WAPE (%) | NRMSE (%) |
 |---|---|---|---|---|---|
-| KNN | 0.0983 | 0.1512 | 0.9921 | 3.71 | 5.71 |
-| **SVM** 🏆 | **0.0327** | **0.0409** | **0.9994** | 1.23 | **1.55** |
-| Random Forest | **0.0266** | 0.1102 | 0.9958 | **1.00** | 4.16 |
+| KNN | 0.0994 | 0.1576 | 0.9914 | 3.76 | 5.95 |
+| SVM | 0.0535 | 0.0818 | 0.9977 | 2.02 | 3.09 |
+| **Random Forest** 🏆 | **0.0441** | **0.0595** | **0.9988** | **1.66** | **2.25** |
 
 > **Cara baca:** *MAE/RMSE* adalah error absolut dalam USD/liter. *WAPE/NRMSE*
 > adalah error relatif terhadap skala harga. R² bukan confidence untuk satu
@@ -92,8 +111,9 @@ Forest menggunakan fitur mentah karena tidak berbasis jarak.
 > negara pada dataset. Karena itu UI menguncinya sebagai metadata dan tidak
 > membuat kombinasi negara/kategori yang tidak pernah ada.
 
-**Best model berdasarkan RMSE:** **SVM** (RMSE = 0.0409, R² = 0.9994).
-Hyper-parameter terpilih: `kernel=poly, C=10, epsilon=0.01, gamma=auto`.
+**Best model berdasarkan RMSE:** **Random Forest** (RMSE = 0.0595, R² = 0.9988).
+Hyper-parameter terpilih: `n_estimators=200, max_depth=12,
+min_samples_leaf=10, min_samples_split=20, bootstrap=True`.
 
 > Dataset bersifat sintetis. Model mempelajari pola generator data dan tidak
 > boleh diklaim sebagai prediktor harga BBM dunia nyata. Input Brent di luar

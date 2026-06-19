@@ -23,7 +23,7 @@ REQUIRED_ARTIFACTS = [
     os.path.join(MODELS_DIR, "rf_model.pkl"),
 ]
 COMPARISON_JSON = os.path.join(DATA_DIR, "model_comparison.json")
-EXPECTED_ARTIFACT_SCHEMA_VERSION = 4
+EXPECTED_ARTIFACT_SCHEMA_VERSION = 8
 
 logging.basicConfig(
     level=logging.INFO,

@@ -84,6 +84,8 @@ MONTHS = [
     ("Oktober (10)", 10), ("November (11)", 11), ("Desember (12)", 12),
 ]
 MODEL_DISPLAY = ["KNN", "SVM", "Random Forest"]
+FUTURE_YEARS_AHEAD = 4
+FUTURE_RECOMMENDED_MODEL = "SVM"
 
 # Gradio 6 moved `css`/`theme` from the Blocks constructor to launch(); Gradio
 # 4.x (the Hugging Face deployment target) requires them on Blocks. Detect the
@@ -115,6 +117,7 @@ class AppState:
         self.brent_year_ranges: dict = {}
         self.year_min: int = 2020
         self.year_max: int = 2026
+        self.forecast_year_max: int = 2030
 
     def model_r2(self, display_name: str) -> float | None:
         """Return the cached test R² for *display_name* (or None)."""
@@ -141,6 +144,7 @@ def _load_everything() -> None:
         STATE.brent_year_ranges = STATE.preprocessor.brent_year_ranges
         STATE.year_min = min(STATE.preprocessor.train_years)
         STATE.year_max = int(STATE.preprocessor.test_year)
+        STATE.forecast_year_max = STATE.year_max + FUTURE_YEARS_AHEAD
         STATE.models = {
             "KNN": KNNModel.load(os.path.join(MODELS_DIR, "knn_model.pkl")),
             "SVM": SVMModel.load(os.path.join(MODELS_DIR, "svm_model.pkl")),
@@ -218,6 +222,21 @@ def country_profile_values(country: str) -> tuple[str, str, str]:
     )
 
 
+def observed_brent_range() -> tuple[float, float] | None:
+    """Return the full observed Brent range across all dataset years."""
+    ranges = list(STATE.brent_year_ranges.values())
+    if not ranges:
+        return None
+    return min(low for low, _ in ranges), max(high for _, high in ranges)
+
+
+def recommended_model_for_year(year: int) -> str:
+    """Return the preferred model for a scenario year."""
+    if int(year) > STATE.year_max:
+        return FUTURE_RECOMMENDED_MODEL
+    return STATE.comparison.get("best_model", {}).get("name", FUTURE_RECOMMENDED_MODEL)
+
+
 def _error_card(message: str) -> str:
     """Return an HTML error card used when models are unavailable."""
     return (
@@ -275,9 +294,33 @@ def predict_price(country, region, income_level, subsidy_level,
     r2_text = f"{r2:.4f}" if r2 is not None else "n/a"
     stats = STATE.country_price_stats.get(country, {})
     tax_range = STATE.country_tax_ranges.get(country)
-    brent_range = STATE.brent_year_ranges.get(int(year))
+    scenario_year = int(year)
+    is_future_year = scenario_year > STATE.year_max
+    brent_range = STATE.brent_year_ranges.get(scenario_year)
+    full_brent_range = observed_brent_range()
     warnings = []
-    if brent_range is None:
+    if is_future_year:
+        warnings.append(
+            f"Tahun {scenario_year} berada setelah data terakhir "
+            f"({STATE.year_max}). Hasil ini adalah prediksi masa depan berbasis "
+            "asumsi Brent dan pajak, bukan akurasi yang sudah tervalidasi.")
+        if (
+            full_brent_range
+            and not full_brent_range[0] <= float(brent_crude) <= full_brent_range[1]
+        ):
+            warnings.append(
+                f"Brent {float(brent_crude):.1f} berada di luar rentang "
+                f"observasi dataset "
+                f"({full_brent_range[0]:.1f}-{full_brent_range[1]:.1f}).")
+        if model_choice != FUTURE_RECOMMENDED_MODEL:
+            warnings.append(
+                f"Untuk tahun masa depan, {FUTURE_RECOMMENDED_MODEL} "
+                "direkomendasikan karena lebih stabil untuk prediksi masa depan.")
+        if model_choice == "KNN":
+            warnings.append(
+                "KNN berbasis tetangga historis, jadi prediksi masa depan bisa "
+                "cenderung datar setelah melewati rentang data.")
+    elif brent_range is None:
         warnings.append(
             f"Tahun {int(year)} tidak tersedia dalam data training/test.")
     elif not brent_range[0] <= float(brent_crude) <= brent_range[1]:
@@ -295,6 +338,9 @@ def predict_price(country, region, income_level, subsidy_level,
     warning_html = "".join(
         f"<div class='notice'><strong>Perhatian:</strong> {message}</div>"
         for message in warnings
+    )
+    forecast_pill = (
+        "<span class=\"pill\">Prediksi masa depan</span>" if is_future_year else ""
     )
 
     # Dense, scannable result card
@@ -327,6 +373,7 @@ def predict_price(country, region, income_level, subsidy_level,
         <span class="pill pill-accent">{country}</span>
         <span class="pill">{region}</span>
         <span class="pill">{int(month):02d}/{int(year)}</span>
+        {forecast_pill}
         <span class="pill">R² {r2_text}</span>
         <span class="pill">{income_level}</span>
         <span class="pill">{subsidy_level}</span>
@@ -357,10 +404,14 @@ def predict_price(country, region, income_level, subsidy_level,
 def build_comparison_df() -> pd.DataFrame:
     """Build the metric comparison table for Tab 2."""
     cols = ["Model", "MAE (USD/L)", "RMSE (USD/L)", "R²",
-            "WAPE (%)", "NRMSE (%)", "MAPE (%)"]
+            "WAPE Test (%)", "WAPE Train (%)", "Gap WAPE (%)",
+            "Generalisasi", "CV", "NRMSE (%)", "MAPE (%)"]
     rows = []
     for name, entry in STATE.comparison.get("models", {}).items():
         m = entry.get("metrics", {})
+        train = entry.get("train_metrics", {})
+        generalization = entry.get("generalization", {})
+        gap = generalization.get("gap", {})
         r2 = m.get("R2", float("nan"))
         mape = m.get("MAPE", float("nan"))
         rows.append({
@@ -368,7 +419,11 @@ def build_comparison_df() -> pd.DataFrame:
             "MAE (USD/L)": round(m.get("MAE", float("nan")), 4),
             "RMSE (USD/L)": round(m.get("RMSE", float("nan")), 4),
             "R²": round(r2, 4),
-            "WAPE (%)": round(m.get("WAPE", float("nan")), 2),
+            "WAPE Test (%)": round(m.get("WAPE", float("nan")), 2),
+            "WAPE Train (%)": round(train.get("WAPE", float("nan")), 2),
+            "Gap WAPE (%)": round(gap.get("WAPE", float("nan")), 2),
+            "Generalisasi": generalization.get("status", "n/a"),
+            "CV": entry.get("cv_strategy", "n/a"),
             "NRMSE (%)": round(m.get("NRMSE", float("nan")), 2),
             "MAPE (%)": round(mape, 2),
         })
@@ -385,12 +440,18 @@ def _model_card_html(name: str, is_best: bool = False) -> str:
     wape = m.get("WAPE")
     mae = m.get("MAE")
     rmse = m.get("RMSE")
+    generalization = entry.get("generalization", {})
+    gap = generalization.get("gap", {})
 
     acc_r2 = f"{r2:.4f}" if r2 is not None else "n/a"
     wape_text = f"{wape:.1f}%" if wape is not None else "n/a"
     mae_text = f"{mae:.4f}" if mae is not None else "n/a"
     rmse_text = f"{rmse:.4f}" if rmse is not None else "n/a"
     r2_text = f"{r2:.4f}" if r2 is not None else "n/a"
+    gap_text = (
+        f"{gap.get('WAPE'):.2f}%" if gap.get("WAPE") is not None else "n/a"
+    )
+    cv_text = entry.get("cv_strategy", "n/a")
 
     best_badge = ""
     best_class = ""
@@ -425,6 +486,8 @@ def _model_card_html(name: str, is_best: bool = False) -> str:
       <div class="model-secondary-metrics">
         <div><span>MAE</span><strong>{mae_text}</strong></div>
         <div><span>RMSE</span><strong>{rmse_text}</strong></div>
+        <div><span>Gap WAPE</span><strong>{gap_text}</strong></div>
+        <div><span>CV</span><strong>{cv_text}</strong></div>
         <div><span>R²</span><strong>{r2_text}</strong></div>
       </div>
     </div>
@@ -1886,6 +1949,7 @@ def build_ui() -> gr.Blocks:
             "alt='FuelPredict'></div>"
             "<div class='nav-meta'><span>Dasar Ilmu Data</span>"
             "<span>2020–2026</span>"
+            f"<span>Prediksi sampai {STATE.forecast_year_max}</span>"
             "<span class='live-pill'><span class='status-dot'></span>"
             "Model siap</span></div></div>"
             "<div id='app-header'>"
@@ -1961,14 +2025,17 @@ def build_ui() -> gr.Blocks:
                             "04 · Periode", "Waktu estimasi"))
                         with gr.Row():
                             year = gr.Slider(
-                                STATE.year_min, STATE.year_max,
-                                value=STATE.year_max, step=1, label="Tahun")
+                                STATE.year_min, STATE.forecast_year_max,
+                                value=STATE.year_max, step=1,
+                                label=f"Tahun (data sampai {STATE.year_max})")
                             month = gr.Dropdown(
                                 choices=MONTHS, value=6, label="Bulan")
 
                         # Section: Model & Action
                         gr.HTML(_section_label(
-                            "05 · Model", f"{default_model} direkomendasikan"))
+                            "05 · Model",
+                            f"{default_model} untuk holdout; "
+                            f"{FUTURE_RECOMMENDED_MODEL} untuk forecast"))
                         model_choice = gr.Radio(
                             MODEL_DISPLAY, value=default_model,
                             label="Pilih Model")
@@ -2019,7 +2086,10 @@ def build_ui() -> gr.Blocks:
                     "(makin kecil = makin baik). "
                     "*R²* = variasi yang dijelaskan pada holdout tahun 2026, "
                     "bukan confidence untuk satu prediksi. "
-                    "*WAPE/NRMSE* = error relatif terhadap skala harga.")
+                    "*WAPE/NRMSE* = error relatif terhadap skala harga. "
+                    "*Gap WAPE* = selisih error test dan train; makin kecil "
+                    "biasanya makin stabil. Semua tuning memakai "
+                    "*TimeSeriesSplit* agar urutan waktu tetap terjaga.")
                 gr.HTML(best_model_badge())
 
                 # Model cards
@@ -2051,8 +2121,8 @@ def build_ui() -> gr.Blocks:
                     gr.Markdown(
                         "**KNN** memprediksi harga dengan merata-ratakan target "
                         "dari *k* tetangga terdekat dalam ruang fitur. "
-                        "Untuk regresi, output = rata-rata (atau rata-rata "
-                        "terbobot jarak) nilai tetangga.\n\n"
+                        "Pada versi ini KNN memakai bobot uniform agar tidak "
+                        "terlalu menghafal titik training.\n\n"
                         "**Kelebihan:** sederhana, non-parametrik, menangkap pola lokal.\n\n"
                         "**Kekurangan:** sensitif terhadap skala fitur & "
                         "*curse of dimensionality*, inferensi lambat untuk data besar.\n\n"
@@ -2069,17 +2139,19 @@ def build_ui() -> gr.Blocks:
                         "**Kelebihan:** kuat di ruang berdimensi tinggi, "
                         "tahan outlier (margin ε).\n\n"
                         "**Kekurangan:** mahal secara komputasi pada data besar — "
-                        "hyperparameter di-*tune* pada subset kecil lalu "
-                        "model terbaik di-refit pada subsample 10.000 baris.\n\n"
+                        "hyperparameter di-*tune* pada 1.500 baris training "
+                        "terbaru dengan TimeSeriesSplit, lalu model terbaik "
+                        "di-refit pada 10.000 baris training terbaru.\n\n"
                         "**Dipilih ketika** hubungan non-linier dan "
                         "jumlah fitur relatif tinggi.")
                 with gr.Accordion(
                         "Random Forest — Ensemble Regression", open=False,
                         elem_classes="model-explanation"):
                     gr.Markdown(
-                        "**Random Forest** adalah ansambel banyak *decision tree* "
-                        "yang dilatih pada subset data & fitur acak; prediksi = "
-                        "rata-rata seluruh pohon.\n\n"
+                        "**Random Forest** adalah ansambel banyak *decision tree*. "
+                        "Pada project ini model belajar koreksi residual di atas "
+                        "tren harga negara, sehingga tetap cocok untuk skenario "
+                        "berbasis waktu.\n\n"
                         "**Kelebihan:** akurasi tinggi, menangani interaksi & "
                         "non-linieritas, robust terhadap skala fitur, "
                         "memberi *feature importance*.\n\n"
@@ -2110,6 +2182,13 @@ def build_ui() -> gr.Blocks:
                     "<div class='snapshot-item'><span>Periode</span>"
                     "<strong>2020–2026</strong></div></div>"
                 )
+                gr.Markdown(
+                    "**Catatan pemakaian data:** model dilatih pada data "
+                    "2020-2025 dan diuji pada holdout 2026. Fitur model memakai "
+                    "`country`, Brent, pajak, waktu, serta prior/tren negara "
+                    "yang dihitung dari data training saja. `diesel_usd_liter` "
+                    "dan `lpg_usd_liter` sengaja tidak dipakai sebagai fitur "
+                    "karena terlalu dekat dengan target `petrol_usd_liter`.")
                 gr.Markdown("### Statistik deskriptif")
                 gr.Dataframe(value=descriptive_stats_df(),
                              interactive=False, wrap=True, label="",

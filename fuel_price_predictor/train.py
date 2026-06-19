@@ -56,7 +56,7 @@ TEST_DATA_PATH = os.path.join(DATA_DIR, "test_data.pkl")
 COMPARISON_JSON = os.path.join(DATA_DIR, "model_comparison.json")
 COMPARISON_PLOT = os.path.join(PLOTS_DIR, "model_comparison.png")
 PREPROCESSOR_PATH = os.path.join(MODELS_DIR, "preprocessor.pkl")
-ARTIFACT_SCHEMA_VERSION = 4
+ARTIFACT_SCHEMA_VERSION = 8
 
 MODEL_FILES = {
     "KNN": os.path.join(MODELS_DIR, "knn_model.pkl"),
@@ -102,7 +102,7 @@ def _build_model(name: str):
 
 
 def _train_one(
-    name: str, model, X_train, y_train,
+    name: str, model, X_train, y_train, feature_names=None,
 ) -> float:
     """Train *model* and return wall-clock training seconds."""
     logger.info("=" * 64)
@@ -110,6 +110,13 @@ def _train_one(
     start = time.perf_counter()
     if name == "SVM":
         model.train(X_train, y_train, subsample=True, subsample_size=10_000)
+    elif name == "Random Forest":
+        trend_index = (
+            feature_names.index("country_trend_forecast_prior")
+            if feature_names and "country_trend_forecast_prior" in feature_names
+            else None
+        )
+        model.train(X_train, y_train, trend_prior_index=trend_index)
     else:
         model.train(X_train, y_train)
     elapsed = time.perf_counter() - start
@@ -176,6 +183,30 @@ def _recompute_best(comparison: dict) -> None:
     if best_name is not None:
         comparison["best_model"] = {
             "name": best_name, "by": "RMSE", "RMSE": round(best_rmse, 5)}
+
+
+def _generalization_report(train_metrics: dict, test_metrics: dict) -> dict:
+    """Summarise train-vs-test gaps for overfitting diagnostics."""
+    gap = {
+        metric: round(test_metrics[metric] - train_metrics[metric], 5)
+        for metric in ("MAE", "RMSE", "WAPE", "NRMSE")
+    }
+    wape_gap = gap["WAPE"]
+    train_wape = train_metrics["WAPE"]
+    if train_wape < 0.5 and wape_gap > 2.0:
+        status = "high_overfitting_risk"
+    elif wape_gap > 1.0:
+        status = "moderate_overfitting_risk"
+    else:
+        status = "controlled"
+    return {
+        "gap": gap,
+        "status": status,
+        "note": (
+            "Positive gaps mean test error is higher than train error; "
+            "large gaps indicate overfitting risk."
+        ),
+    }
 
 
 def _plot_comparison(comparison: dict) -> None:
@@ -287,7 +318,11 @@ def run(selected: str = "all") -> dict:
         "split": "year_holdout",
         "train_years": pre.train_years,
         "test_year": pre.test_year,
-        "country_representation": "one-hot plus train-only country price prior",
+        "model_selection_cv": "TimeSeriesSplit on chronological training rows",
+        "country_representation": (
+            "one-hot plus train-only country price and trend priors"
+        ),
+        "random_forest_strategy": "country trend prior plus residual forest",
         "parallel_fuel_targets_used_as_features": False,
     }
     comparison["diagnostics"] = _dataset_diagnostics(df)
@@ -295,7 +330,8 @@ def run(selected: str = "all") -> dict:
     # 3) Train + evaluate each model.
     for name in to_train:
         model = _build_model(name)
-        elapsed = _train_one(name, model, X_train, y_train)
+        elapsed = _train_one(name, model, X_train, y_train, feature_names)
+        train_metrics = compute_metrics(y_train, model.predict(X_train))
         metrics = model.evaluate(X_test, y_test)
 
         # Diagnostic plots.
@@ -313,7 +349,12 @@ def run(selected: str = "all") -> dict:
         model.save(MODEL_FILES[name])
         entry = {
             "metrics": {k: round(v, 5) for k, v in metrics.items()},
+            "train_metrics": {
+                k: round(v, 5) for k, v in train_metrics.items()
+            },
+            "generalization": _generalization_report(train_metrics, metrics),
             "best_params": model.get_best_params(),
+            "cv_strategy": getattr(model, "cv_strategy", "unknown"),
             "train_seconds": round(elapsed, 2),
             "trained_at": datetime.now().isoformat(timespec="seconds"),
         }

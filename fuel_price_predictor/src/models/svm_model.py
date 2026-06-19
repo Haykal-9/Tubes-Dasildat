@@ -14,7 +14,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVR, SVR
 
-from ._common import compute_metrics, plot_predictions_vs_actual, plot_residuals
+from ._common import (
+    compute_metrics,
+    make_time_series_cv,
+    plot_predictions_vs_actual,
+    plot_residuals,
+)
 
 logger = logging.getLogger(__name__)
 RANDOM_STATE = 42
@@ -40,27 +45,28 @@ class SVMModel:
         self.best_params_: Dict | None = None
         self.best_score_: float | None = None
         self.subsample_info = ""
+        self.cv_strategy = "TimeSeriesSplit"
 
     def train(
         self, X_train: np.ndarray, y_train: np.ndarray,
         subsample: bool = True, subsample_size: int = 10_000,
         tune_size: int = 1_500,
     ) -> "SVMModel":
-        rng = np.random.RandomState(RANDOM_STATE)
         n = len(X_train)
         if subsample and n > subsample_size:
-            fit_idx = rng.choice(n, size=subsample_size, replace=False)
-            X_fit, y_fit = X_train[fit_idx], y_train[fit_idx]
-            fit_note = f"final fit on {subsample_size:,} of {n:,} rows"
+            X_fit, y_fit = X_train[-subsample_size:], y_train[-subsample_size:]
+            fit_note = (
+                f"final fit on most recent {subsample_size:,} of {n:,} rows"
+            )
         else:
             X_fit, y_fit = X_train, y_train
             fit_note = f"final fit on all {n:,} rows"
 
         if len(X_fit) > tune_size:
-            tune_idx = rng.choice(len(X_fit), size=tune_size, replace=False)
-            X_tune, y_tune = X_fit[tune_idx], y_fit[tune_idx]
+            X_tune, y_tune = X_fit[-tune_size:], y_fit[-tune_size:]
         else:
             X_tune, y_tune = X_fit, y_fit
+        temporal_cv = make_time_series_cv(len(X_tune), self.cv)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ConvergenceWarning)
@@ -75,7 +81,7 @@ class SVMModel:
                 "svr__gamma": self.PARAM_GRID["gamma"],
             }
             svr_search = GridSearchCV(
-                svr_pipeline, svr_grid, cv=self.cv,
+                svr_pipeline, svr_grid, cv=temporal_cv,
                 scoring="neg_mean_squared_error", n_jobs=self.n_jobs, refit=False,
             )
             svr_search.fit(X_tune, y_tune)
@@ -90,7 +96,7 @@ class SVMModel:
                 "svr__epsilon": self.PARAM_GRID["epsilon"],
             }
             linear_search = GridSearchCV(
-                linear_pipeline, linear_grid, cv=self.cv,
+                linear_pipeline, linear_grid, cv=temporal_cv,
                 scoring="neg_mean_squared_error", n_jobs=self.n_jobs, refit=False,
             )
             linear_search.fit(X_tune, y_tune)
@@ -128,7 +134,8 @@ class SVMModel:
 
         self.best_params_ = params
         self.subsample_info = (
-            f"Scaled Pipeline; tuned on {len(X_tune):,} rows (cv={self.cv}); "
+            f"Scaled Pipeline; tuned on most recent {len(X_tune):,} rows "
+            f"(cv={self.cv_strategy}, splits={self.cv}); "
             f"{fit_note}."
         )
         logger.info("[SVM] Best params: %s", self.best_params_)
@@ -164,6 +171,7 @@ class SVMModel:
             "best_params_": self.best_params_,
             "best_score_": self.best_score_,
             "subsample_info": self.subsample_info,
+            "cv_strategy": self.cv_strategy,
         }, path, compress=3)
 
     @classmethod
@@ -174,6 +182,7 @@ class SVMModel:
         obj.best_params_ = payload.get("best_params_")
         obj.best_score_ = payload.get("best_score_")
         obj.subsample_info = payload.get("subsample_info", "")
+        obj.cv_strategy = payload.get("cv_strategy", "TimeSeriesSplit")
         return obj
 
     def _check_trained(self) -> None:

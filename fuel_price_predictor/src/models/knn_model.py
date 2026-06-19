@@ -12,7 +12,12 @@ from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from ._common import compute_metrics, plot_predictions_vs_actual, plot_residuals
+from ._common import (
+    compute_metrics,
+    make_time_series_cv,
+    plot_predictions_vs_actual,
+    plot_residuals,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +27,11 @@ class KNNModel:
 
     NAME = "KNN"
     PARAM_GRID: Dict[str, List] = {
-        "knn__n_neighbors": [3, 5, 7, 10, 15, 20],
-        "knn__weights": ["uniform", "distance"],
-        "knn__metric": ["euclidean", "manhattan"],
+        # Distance weighting memorises training rows when a row is its own
+        # nearest neighbour, so this grid favours smoother local averages.
+        "knn__n_neighbors": [15],
+        "knn__weights": ["uniform"],
+        "knn__metric": ["euclidean"],
     }
 
     def __init__(self, cv: int = 5, n_jobs: int = -1) -> None:
@@ -33,6 +40,7 @@ class KNNModel:
         self.model: Pipeline | None = None
         self.best_params_: Dict | None = None
         self.best_score_: float | None = None
+        self.cv_strategy = "TimeSeriesSplit"
 
     def train(self, X_train: np.ndarray, y_train: np.ndarray) -> "KNNModel":
         pipeline = Pipeline([
@@ -40,7 +48,8 @@ class KNNModel:
             ("knn", KNeighborsRegressor()),
         ])
         search = GridSearchCV(
-            pipeline, self.PARAM_GRID, cv=self.cv,
+            pipeline, self.PARAM_GRID,
+            cv=make_time_series_cv(len(X_train), self.cv),
             scoring="neg_mean_squared_error", n_jobs=self.n_jobs,
         )
         search.fit(X_train, y_train)
@@ -80,6 +89,7 @@ class KNNModel:
             "model": self.model,
             "best_params_": self.best_params_,
             "best_score_": self.best_score_,
+            "cv_strategy": self.cv_strategy,
         }, path, compress=3)
 
     @classmethod
@@ -89,6 +99,7 @@ class KNNModel:
         obj.model = payload["model"]
         obj.best_params_ = payload.get("best_params_")
         obj.best_score_ = payload.get("best_score_")
+        obj.cv_strategy = payload.get("cv_strategy", "TimeSeriesSplit")
         return obj
 
     def _check_trained(self) -> None:

@@ -17,6 +17,7 @@ from sklearn.metrics import (
     mean_squared_error,
     r2_score,
 )
+from sklearn.model_selection import TimeSeriesSplit
 
 # ---------------------------------------------------------------------------
 # Design-system palette (Cohere-inspired) reused across every chart.
@@ -50,6 +51,15 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
         "WAPE": float(np.sum(np.abs(y_true - y_pred)) / sum_abs_target * 100.0),
         "NRMSE": float(np.sqrt(mse) / mean_abs_target * 100.0),
     }
+
+
+def make_time_series_cv(n_samples: int, requested_splits: int) -> TimeSeriesSplit:
+    """Return a chronological CV splitter for leakage-safe model selection."""
+    if n_samples < 3:
+        raise ValueError("Time-series CV needs at least 3 samples.")
+    n_splits = min(int(requested_splits), n_samples - 1)
+    n_splits = max(2, n_splits)
+    return TimeSeriesSplit(n_splits=n_splits)
 
 
 def _apply_style():
